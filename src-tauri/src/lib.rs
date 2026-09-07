@@ -95,7 +95,7 @@ async fn add_extension(
 ) -> Result<Extension, String> {
     let _g = _lock.lock().map_err(|_| "lock interno")?;
     let s = store_of(&app)?;
-    let gecko_id = firefox::read_gecko_id(PathBuf::from(&src_path))?;
+    let gecko_id = firefox::read_gecko_id(&PathBuf::from(&src_path))?;
 
     let file = format!("{gecko_id}.xpi");
     let dst_dir = s.ext_store_dir(&id);

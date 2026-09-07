@@ -14,6 +14,7 @@ pub const UBLOCK_ID: &str = "uBlock0@raymondhill.net";
 
 /// Suprimir janela de console em TODO spawn (firefox, powershell).
 pub fn no_window(cmd: &mut Command) {
+    let _ = cmd; // no Linux/macOS não há console pra suprimir
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
