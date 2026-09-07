@@ -1,0 +1,229 @@
+﻿name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Duas tags empurradas em sequÃªncia nÃ£o disputam a mesma release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - platform: ubuntu-22.04
+            rust-target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl wget file
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: Cargo.lock em dia (--locked)
+        working-directory: src-tauri
+        run: cargo fetch --locked
+
+      # `tagName` vazio = o tauri-action compila e NÃƒO publica. O token segue
+      # no ambiente porque a action o lÃª na inicializaÃ§Ã£o, antes de decidir se
+      # vai publicar â€” sem ele o passo pode morrer sem nem comeÃ§ar o build.
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ""
+          includeUpdaterJson: false
+          args: --bundles ${{ matrix.bundles }}
+      # O AppImage sai do runner carregando libs do Ubuntu que precisam vir do
+      # HOST (libwayland/GL) e um runtime que pede libfuse.so.2. Em Arch/Fedora
+      # isso vira janela BRANCA (EGL_BAD_PARAMETER) ou app que nao abre â€” bugs
+      # que o CI nunca ve, porque o CI e justamente a distro onde funciona.
+      # Ver Anon5T4R/linux-packaging.
+      - name: Consertar o AppImage para outras distros
+        if: runner.os == 'Linux'
+        uses: Anon5T4R/linux-packaging/fix-appimage@v1
+        with:
+          path: src-tauri/target/release/bundle/appimage
+
+      # Pacote nativo do pacman, reempacotado do .deb. O binario passa a usar
+      # o webkit2gtk/GTK DO SISTEMA em vez de carregar os do runner â€” que e a
+      # classe de bug que o AppImage tem por construcao. O Hub prefere este
+      # asset ao AppImage quando a maquina tem pacman.
+      - name: Empacotar para o Arch (.pkg.tar.zst)
+        if: runner.os == 'Linux'
+        uses: Anon5T4R/linux-packaging/arch-package@v1
+        with:
+          license: MIT
+          description: 'Monitor de sistema 100% offline (Gerenciador de Tarefas local)'
+
+      # Junta o que saiu num lugar sÃ³. Se o instalador nÃ£o estiver aqui, o
+      # release para AGORA, com a mensagem certa â€” e nÃ£o daqui a 15 minutos
+      # com "falha no upload", que mandaria investigar o lugar errado.
+      - name: Separar o instalador
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+          encontrou=0
+          for p in src-tauri/target/release/bundle/nsis/*-setup.exe \
+                   src-tauri/target/release/bundle/deb/*.deb \
+                   src-tauri/target/release/bundle/appimage/*.AppImage \
+                   dist-arch/*.pkg.tar.zst; do
+            [ -e "$p" ] || continue
+            cp "$p" dist-release/
+            echo "empacotado: $(basename "$p") ($(du -h "$p" | cut -f1))"
+            encontrou=1
+          done
+          if [ "$encontrou" -eq 0 ]; then
+            echo "::error::o build terminou sem instalador em ${{ matrix.bundles }}"
+            exit 1
+          fi
+
+      - name: Guardar o instalador
+        uses: actions/upload-artifact@v6
+        with:
+          name: instalador-${{ matrix.bundles }}
+          path: dist-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # PUBLICA UMA VEZ SÃ“, com tudo na mÃ£o.
+  #
+  # `needs` sem `if: always()` Ã© de propÃ³sito: se qualquer plataforma falhou, Ã©
+  # melhor NÃƒO ter release nenhuma do que ter uma pela metade â€” o usuÃ¡rio que sÃ³
+  # vÃª o .exe nÃ£o tem como saber que faltou o AppImage.
+  #
+  # E como este job nÃ£o compila nada, repetir uma publicaÃ§Ã£o que falhou custa
+  # segundos em vez de meia hora.
+  # ---------------------------------------------------------------------------
+  publicar:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Baixar os instaladores
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Conferir ANTES de criar a release
+        shell: bash
+        run: |
+          set -uo pipefail
+          ls -lh dist/
+          falta=0
+          ls dist/*-setup.exe >/dev/null 2>&1 \
+            || { echo "::error::falta o instalador do Windows"; falta=1; }
+          ls dist/*.AppImage >/dev/null 2>&1 \
+            || { echo "::error::falta o AppImage"; falta=1; }
+          exit $falta
+
+      - name: Publicar (com retentativa)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -uo pipefail
+          cat > notas.md <<'EOF'
+          ## LocalBrowser __TAG__
+
+          Monitor de sistema 100% offline da suÃ­te Local: CPU (total e por nÃºcleo),
+          memÃ³ria, rede e discos ao vivo + lista de processos com encerrar
+          (com confirmaÃ§Ã£o). Gerenciador de Tarefas local.
+
+          ### Downloads
+          - **Windows â€” Instalador:** `*-setup.exe`
+          - **Linux â€” AppImage:** `*.AppImage` (dÃª permissÃ£o de execuÃ§Ã£o e rode)
+          EOF
+          sed -i "s/__TAG__/$TAG/g" notas.md
+
+          # `--repo` explÃ­cito: este job nÃ£o faz checkout, entÃ£o nÃ£o hÃ¡
+          # repositÃ³rio git pra o gh inferir â€” sem isso ele morre com "not a
+          # git repository", que parece erro de permissÃ£o e manda investigar
+          # o token.
+          publicar() {
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+            else
+              gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+                --title "LocalBrowser $TAG" --notes-file notas.md
+            fi
+          }
+
+          for t in 1 2 3 4 5; do
+            if publicar; then
+              echo "publicado na tentativa $t"
+              exit 0
+            fi
+            echo "tentativa $t falhou; esperando $((t * 20))s"
+            sleep $((t * 20))
+          done
+          echo "::error::a publicaÃ§Ã£o falhou 5 vezes seguidas"
+          exit 1
+
+      # Rede de seguranÃ§a: confirma no servidor o que achamos ter subido.
+      - name: Conferir a release publicada
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          nomes=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+                    --json assets -q '.assets[].name' 2>/dev/null)
+          echo "Anexos na release:"
+          echo "${nomes:-(nenhum)}"
+          falta=0
+          echo "$nomes" | grep -q -- '-setup\.exe$' \
+            || { echo "::error::o .exe nÃ£o chegou na release"; falta=1; }
+          echo "$nomes" | grep -q -- '\.AppImage$' \
+            || { echo "::error::o AppImage nÃ£o chegou na release"; falta=1; }
+          exit $falta

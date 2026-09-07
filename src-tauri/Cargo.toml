@@ -1,0 +1,30 @@
+[package]
+name = "localbrowser"
+version = "0.1.0"
+description = "LocalBrowser — sites como apps locais, sobre Firefox + uBlock, 100% offline"
+authors = ["Taylor"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Anon5T4R/LocalBrowser"
+
+[lib]
+# O sufixo `_lib` evita conflito entre o nome da lib e o do binário no Windows
+# (https://github.com/rust-lang/cargo/issues/8519).
+name = "localbrowser_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Download do uBlock Origin (xpi) — blocking + rustls, sem openssl.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+# Ler o id interno (gecko.id) de xpi arbitrários antes de instalar no perfil.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tauri-plugin-dialog = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
