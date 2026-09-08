@@ -7,8 +7,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-/// URL canônica do uBlock Origin (assinado, xpi do Firefox).
-const UBLOCK_URL: &str = "https://github.com/gorhill/uBlock/releases/latest/download/uBlock0_1.ff.xpi";
+/// Fontes do uBlock Origin (assinado, xpi do Firefox), por ordem de
+/// preferência: GitHub (versão mais nova) e permalink estável do AMO
+/// (id 607454) — o fallback cobre rede com GitHub bloqueado/lento.
+const UBLOCK_URLS: [&str; 2] = [
+    "https://github.com/gorhill/uBlock/releases/latest/download/uBlock0_1.ff.xpi",
+    "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/addon-607454-latest.xpi",
+];
 /// Id interno do uBlock no Gecko (o nome do xpi dentro do perfil TEM que ser o id).
 pub const UBLOCK_ID: &str = "uBlock0@raymondhill.net";
 
@@ -109,20 +114,35 @@ pub fn ensure_ublock(store: &Store) -> Result<PathBuf, String> {
         .timeout(Duration::from_secs(60))
         .build()
         .map_err(|e| format!("http: {e}"))?;
-    let resp = client
-        .get(UBLOCK_URL)
-        .send()
-        .map_err(|e| format!("baixar uBlock: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("baixar uBlock: HTTP {}", resp.status()));
+    let mut last_err = String::new();
+    for url in UBLOCK_URLS {
+        match download_xpi(&client, url, &cache) {
+            Ok(()) => return Ok(cache),
+            Err(e) => last_err = e,
+        }
     }
-    let bytes = resp.bytes().map_err(|e| format!("baixar uBlock: {e}"))?;
+    Err(format!("baixar uBlock: {last_err}"))
+}
+
+/// Uma tentativa de download com as validações (zip + tamanho crível).
+fn download_xpi(client: &reqwest::blocking::Client, url: &str, dst: &Path) -> Result<(), String> {
+    let resp = client
+        .get(url)
+        .send()
+        .map_err(|e| format!("{url}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("{url}: HTTP {}", resp.status()));
+    }
+    let bytes = resp
+        .bytes()
+        .map_err(|e| format!("{url}: {e}"))?
+        .to_vec();
     // sanidade: é um zip e tem tamanho crível (>100 KB)
     if bytes.len() < 100_000 || bytes.first() != Some(&b'P') || bytes.get(1) != Some(&b'K') {
-        return Err("download do uBlock não parece um xpi válido".into());
+        return Err(format!("{url}: não parece um xpi válido"));
     }
-    fs::write(&cache, &bytes).map_err(|e| format!("gravar uBlock: {e}"))?;
-    Ok(cache)
+    fs::write(dst, &bytes).map_err(|e| format!("gravar uBlock: {e}"))?;
+    Ok(())
 }
 
 /// Copia o uBlock (se habilitado) e as extensões extras para o perfil.
