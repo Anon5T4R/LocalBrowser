@@ -150,7 +150,7 @@ async fn shortcut_exists(app: AppHandle, id: String) -> Result<bool, String> {
 async fn create_shortcut(app: AppHandle, id: String) -> Result<(), String> {
     let s = store_of(&app)?;
     let wa = s.find_app(&id)?;
-    shortcuts::create(&s, &wa.id, &wa.name)
+    shortcuts::create(&s, &wa.id, &wa.name, &wa.url)
 }
 
 #[tauri::command]

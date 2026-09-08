@@ -1,6 +1,6 @@
 [package]
 name = "localbrowser"
-version = "0.1.0"
+version = "0.1.1"
 description = "LocalBrowser — sites como apps locais, sobre Firefox + uBlock, 100% offline"
 authors = ["Taylor"]
 edition = "2021"
@@ -28,3 +28,4 @@ tauri-plugin-dialog = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
+

@@ -40,17 +40,24 @@ fn current_exe() -> Result<PathBuf, String> {
     std::env::current_exe().map_err(|e| format!("exe atual: {e}"))
 }
 
-/// Cria o atalho e registra em shortcuts.json.
-pub fn create(store: &Store, app_id: &str, app_name: &str) -> Result<(), String> {
+/// Cria o atalho e registra em shortcuts.json. O ícone do atalho é o favicon
+/// do site (Google s2, 128px); se o download falhar, segue com o ícone padrão.
+pub fn create(store: &Store, app_id: &str, app_name: &str, url: &str) -> Result<(), String> {
     let exe = current_exe()?;
     let desktop = desktop_dir()?;
+    let icon = site_icon(store, app_id, url);
 
     if cfg!(windows) {
         // nome do arquivo legível; aspas simples escapadas dobrando '
         let file = desktop.join(format!("LocalBrowser — {app_name}.lnk"));
+        let icon_line = match &icon {
+            Ok(ico) => format!("$s.IconLocation='{}',0; ", ico.display().to_string().replace('\'', "''")),
+            Err(_) => String::new(),
+        };
         let ps = format!(
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}'); \
-             $s.TargetPath='{}'; $s.Arguments='--launch {app_id}'; $s.Save()",
+             $s.TargetPath='{}'; {icon_line}\
+             $s.Arguments='--launch {app_id}'; $s.Save()",
             file.display().to_string().replace('\'', "''"),
             exe.display().to_string().replace('\'', "''"),
         );
@@ -68,9 +75,13 @@ pub fn create(store: &Store, app_id: &str, app_name: &str) -> Result<(), String>
             std::env::var("HOME").map_err(|_| "HOME não definido")?,
         )
         .join(".local/share/applications");
+        let icon_name = match &icon {
+            Ok(ico) => ico.display().to_string(),
+            Err(_) => "firefox".to_owned(),
+        };
         let entry = format!(
             "[Desktop Entry]\nType=Application\nName=LocalBrowser — {app_name}\n\
-             Exec=\"{}\" --launch {app_id}\nIcon=firefox\nTerminal=false\n",
+             Exec=\"{}\" --launch {app_id}\nIcon={icon_name}\nTerminal=false\n",
             exe.display(),
         );
         fs::write(&file, &entry).map_err(|e| format!("criar .desktop: {e}"))?;
@@ -117,4 +128,60 @@ fn register(store: &Store, app_id: &str, path: &PathBuf) -> Result<(), String> {
         path: path.display().to_string(),
     });
     store.save_shortcuts(&shortcuts)
+}
+
+/// Baixa o favicon do site e devolve o caminho de um `.ico` (PNG-in-ICO,
+/// válido Vista+). Guarda `icons/<id>.{png,ico}` em app_data; re-baixar a
+/// cada create = atualizar se o site trocar de ícone.
+fn site_icon(store: &Store, app_id: &str, url: &str) -> Result<PathBuf, String> {
+    let host = host_of(url).ok_or_else(|| "sem host na URL".to_owned())?;
+    let dir = store.root.join("icons");
+    fs::create_dir_all(&dir).map_err(|e| format!("criar icons: {e}"))?;
+
+    // Google s2: favicon do domínio, 128px, sempre PNG (ou o default globo).
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("http: {e}"))?;
+    let resp = client
+        .get(format!("https://www.google.com/s2/favicons?domain={host}&sz=128"))
+        .send()
+        .map_err(|e| format!("favicon: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("favicon: HTTP {}", resp.status()));
+    }
+    let png = resp.bytes().map_err(|e| format!("favicon: {e}"))?;
+    // sanidade: é um PNG de verdade e não o placeholder minúsculo
+    if png.len() < 200 || png[..8] != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        return Err("favicon não parece um PNG válido".into());
+    }
+
+    let png_path = dir.join(format!("{app_id}.png"));
+    fs::write(&png_path, &png).map_err(|e| format!("gravar png: {e}"))?;
+
+    // ICO = ICONDIR (6 bytes) + 1 entrada (16 bytes) + o PNG
+    let ico_path = dir.join(format!("{app_id}.ico"));
+    let mut ico: Vec<u8> = Vec::with_capacity(png.len() + 22);
+    ico.extend_from_slice(&[0, 0, 1, 0, 1, 0]); // reserved, type=icon, count=1
+    ico.push(0);
+    ico.push(0); // 256x256 (0 = 256)
+    ico.push(0);
+    ico.push(0); // paleta/reservado
+    ico.extend_from_slice(&1u16.to_le_bytes()); // planos
+    ico.extend_from_slice(&32u16.to_le_bytes()); // bpp
+    ico.extend_from_slice(&(png.len() as u32).to_le_bytes());
+    ico.extend_from_slice(&22u32.to_le_bytes()); // offset após cabeçalhos
+    ico.extend_from_slice(&png);
+    fs::write(&ico_path, &ico).map_err(|e| format!("gravar ico: {e}"))?;
+    Ok(ico_path)
+}
+
+/// Host da URL (sem www), pedaço usado pra buscar o favicon.
+fn host_of(url: &str) -> Option<String> {
+    let no_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    let host = no_scheme.split(['/', '?', '#']).next()?.split('@').last()?;
+    let host = host.split(':').next()?;
+    let host = host.trim().to_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host).to_owned();
+    if host.is_empty() { None } else { Some(host) }
 }

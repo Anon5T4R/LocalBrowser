@@ -157,9 +157,11 @@ impl Store {
         }
         self.save_apps(&apps)?;
 
-        // perfil e extensões
+        // perfil, extensões e ícone de site do atalho
         let _ = fs::remove_dir_all(self.root.join("profiles").join(id));
         let _ = fs::remove_dir_all(self.root.join("extensions").join(id));
+        let _ = fs::remove_file(self.root.join("icons").join(format!("{id}.ico")));
+        let _ = fs::remove_file(self.root.join("icons").join(format!("{id}.png")));
 
         // atalho registrado
         let mut shortcuts = self.shortcuts()?;
