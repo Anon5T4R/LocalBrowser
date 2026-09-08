@@ -147,14 +147,19 @@ fn download_xpi(client: &reqwest::blocking::Client, url: &str, dst: &Path) -> Re
 
 /// Copia o uBlock (se habilitado) e as extensões extras para o perfil.
 /// Sobrescrever = atualizar a versão em lançamentos futuros.
+///
+/// A cópia é BEST-EFFORT: com o app ainda aberto, o Firefox mantém o xpi
+/// mapeado na memória e o Windows recusa sobrescrever (os error 1224,
+/// "user-mapped section", ou 32, sharing violation). Nesse caso a extensão
+/// já está instalada no perfil — o launch segue e a atualização de versão
+/// pega na primeira abertura com tudo fechado.
 pub fn sync_extensions(store: &Store, app: &WebApp) -> Result<(), String> {
     let ext_dir = store.profile_dir(&app.id).join("extensions");
     fs::create_dir_all(&ext_dir).map_err(|e| format!("criar extensions: {e}"))?;
 
     if app.ublock {
         let src = ensure_ublock(store)?;
-        let dst = ext_dir.join(format!("{UBLOCK_ID}.xpi"));
-        fs::copy(&src, &dst).map_err(|e| format!("instalar uBlock: {e}"))?;
+        copy_best_effort(&src, &ext_dir.join(format!("{UBLOCK_ID}.xpi")), "uBlock")?;
     } else {
         // desligou o uBlock → remove do perfil se estava lá
         let _ = fs::remove_file(ext_dir.join(format!("{UBLOCK_ID}.xpi")));
@@ -163,11 +168,27 @@ pub fn sync_extensions(store: &Store, app: &WebApp) -> Result<(), String> {
     for ext in &app.extensions {
         let src = store.ext_store_dir(&app.id).join(&ext.file);
         if src.is_file() {
-            let dst = ext_dir.join(&ext.file);
-            fs::copy(&src, &dst).map_err(|e| format!("instalar {}: {e}", ext.name))?;
+            copy_best_effort(&src, &ext_dir.join(&ext.file), &ext.name)?;
         }
     }
     Ok(())
+}
+
+/// true se o erro é "arquivo em uso" (Firefox aberto com o xpi mapeado).
+fn err_file_in_use(e: &std::io::Error) -> bool {
+    matches!(
+        e.raw_os_error(),
+        Some(32) | Some(1224) // ERROR_SHARING_VIOLATION | ERROR_USER_MAPPED_FILE
+    )
+}
+
+/// Cópia que não derruba o launch quando o destino está travado pelo Firefox.
+fn copy_best_effort(src: &Path, dst: &Path, what: &str) -> Result<(), String> {
+    match fs::copy(src, dst) {
+        Ok(_) => Ok(()),
+        Err(e) if err_file_in_use(&e) => Ok(()), // já instalado; atualiza depois
+        Err(e) => Err(format!("instalar {what}: {e}")),
+    }
 }
 
 // ---- id interno de um xpi ----
