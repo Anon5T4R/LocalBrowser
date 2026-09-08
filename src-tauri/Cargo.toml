@@ -1,6 +1,6 @@
 [package]
 name = "localbrowser"
-version = "0.2.0"
+version = "0.2.1"
 description = "LocalBrowser — sites como apps locais, sobre Firefox + uBlock, 100% offline"
 authors = ["Taylor"]
 edition = "2021"

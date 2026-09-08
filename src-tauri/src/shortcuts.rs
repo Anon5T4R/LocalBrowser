@@ -8,7 +8,7 @@
 use crate::firefox::no_window;
 use crate::store::{ShortcutEntry, Store};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn desktop_dir() -> Result<PathBuf, String> {
@@ -132,13 +132,33 @@ fn register(store: &Store, app_id: &str, path: &PathBuf) -> Result<(), String> {
 
 /// Baixa o favicon do site e devolve o caminho de um `.ico` (PNG-in-ICO,
 /// válido Vista+). Guarda `icons/<id>.{png,ico}` em app_data; re-baixar a
-/// cada create = atualizar se o site trocar de ícone.
+/// cada create = atualizar se o site trocar de ícone. Download falhando,
+/// cai no `.ico` já em cache (ícone é enfeite — cache velho > nenhum).
 fn site_icon(store: &Store, app_id: &str, url: &str) -> Result<PathBuf, String> {
     let host = host_of(url).ok_or_else(|| "sem host na URL".to_owned())?;
     let dir = store.root.join("icons");
     fs::create_dir_all(&dir).map_err(|e| format!("criar icons: {e}"))?;
+    let ico_path = dir.join(format!("{app_id}.ico"));
 
-    // Google s2: favicon do domínio, 128px, sempre PNG (ou o default globo).
+    match download_site_icon(&dir, app_id, &host, &ico_path) {
+        Ok(()) => Ok(ico_path),
+        Err(e) => {
+            if ico_path.is_file() {
+                Ok(ico_path) // cache de uma tentativa antiga
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Baixa o favicon (Google s2, 128px, PNG) e grava png + ico.
+fn download_site_icon(
+    dir: &Path,
+    app_id: &str,
+    host: &str,
+    ico_path: &Path,
+) -> Result<(), String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
         .build()
@@ -160,7 +180,6 @@ fn site_icon(store: &Store, app_id: &str, url: &str) -> Result<PathBuf, String> 
     fs::write(&png_path, &png).map_err(|e| format!("gravar png: {e}"))?;
 
     // ICO = ICONDIR (6 bytes) + 1 entrada (16 bytes) + o PNG
-    let ico_path = dir.join(format!("{app_id}.ico"));
     let mut ico: Vec<u8> = Vec::with_capacity(png.len() + 22);
     ico.extend_from_slice(&[0, 0, 1, 0, 1, 0]); // reserved, type=icon, count=1
     ico.push(0);
@@ -172,8 +191,8 @@ fn site_icon(store: &Store, app_id: &str, url: &str) -> Result<PathBuf, String> 
     ico.extend_from_slice(&(png.len() as u32).to_le_bytes());
     ico.extend_from_slice(&22u32.to_le_bytes()); // offset após cabeçalhos
     ico.extend_from_slice(&png);
-    fs::write(&ico_path, &ico).map_err(|e| format!("gravar ico: {e}"))?;
-    Ok(ico_path)
+    fs::write(ico_path, &ico).map_err(|e| format!("gravar ico: {e}"))?;
+    Ok(())
 }
 
 /// Host da URL (sem www), pedaço usado pra buscar o favicon.
