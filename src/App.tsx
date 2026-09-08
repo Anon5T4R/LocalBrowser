@@ -247,6 +247,7 @@ function AppCard(props: {
         </div>
       </div>
       <div className="badges">
+        {app.appMode && <span className="badge">{t("badge.app")}</span>}
         {app.ublock && <span className="badge">{t("badge.ublock")}</span>}
         {app.kiosk && <span className="badge">{t("badge.kiosk")}</span>}
         {app.extensions.length > 0 && (
@@ -285,6 +286,7 @@ function EditModal(props: {
   const [url, setUrl] = useState(existing?.url ?? "");
   const [kiosk, setKiosk] = useState(existing?.kiosk ?? false);
   const [ublock, setUblock] = useState(existing?.ublock ?? true);
+  const [appMode, setAppMode] = useState(existing?.appMode ?? true);
   const [exts, setExts] = useState(existing?.extensions ?? []);
 
   const pickPreset = (p: Preset) => {
@@ -302,7 +304,15 @@ function EditModal(props: {
         while (takenIds.includes(id)) id = `${base}-${n++}`;
         return id;
       })();
-    props.onSave({ id, name: name.trim(), url: normalizeUrl(url), kiosk, ublock, extensions: exts });
+    props.onSave({
+      id,
+      name: name.trim(),
+      url: normalizeUrl(url),
+      kiosk,
+      ublock,
+      appMode,
+      extensions: exts,
+    });
   };
 
   const addExt = async () => {
@@ -371,7 +381,23 @@ function EditModal(props: {
         </label>
 
         <label className="check">
-          <input type="checkbox" checked={kiosk} onChange={(e) => setKiosk(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={appMode}
+            onChange={(e) => {
+              setAppMode(e.target.checked);
+              if (e.target.checked) setKiosk(false); // modo app já é janela limpa
+            }}
+          />
+          {t("dlg.appMode")}
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={kiosk}
+            disabled={appMode}
+            onChange={(e) => setKiosk(e.target.checked)}
+          />
           {t("dlg.kiosk")}
         </label>
         <label className="check">

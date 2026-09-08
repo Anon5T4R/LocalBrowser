@@ -87,6 +87,9 @@ user_pref(\"browser.shell.checkDefaultBrowser\", false);
 user_pref(\"browser.aboutwelcome.enabled\", false);
 user_pref(\"datareporting.policy.dataSubmissionEnabled\", false);
 user_pref(\"toolkit.legacyUserProfileCustomizations.stylesheets\", true);
+// Web apps do Firefox (-taskbar-tab): ligado por padrão no Windows, NÃO no
+// Linux — ligamos sempre pra o modo app funcionar igual nas duas plataformas.
+user_pref(\"browser.taskbarTabs.enabled\", true);
 "
 }
 
@@ -239,6 +242,34 @@ pub fn read_gecko_id(xpi: &Path) -> Result<String, String> {
     Err("não achei o id interno da extensão (manifest.json/install.rdf)".into())
 }
 
+// ---- taskbar tabs (web apps do Firefox) ----
+
+/// Lê o registry de web apps do perfil (`taskbartabs/taskbartabs.json`) e
+/// devolve o id do web app cujo startUrl casa com o host da URL do nosso app.
+/// O Firefox gera o UUID dele na criação (bug 1985658) — por isso lançamos
+/// com um id provisório na 1ª vez e pegamos o REAL aqui nas seguintes.
+fn find_taskbar_tab(profile: &Path, app: &WebApp) -> Option<String> {
+    let raw = fs::read_to_string(profile.join("taskbartabs").join("taskbartabs.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let host = url_host(&app.url)?;
+    for tab in v.get("taskbarTabs")?.as_array()? {
+        let start = tab.get("startUrl")?.as_str()?;
+        if url_host(start).as_deref() == Some(host.as_str()) {
+            return tab.get("id").and_then(|i| i.as_str()).map(str::to_owned);
+        }
+    }
+    None
+}
+
+/// Host de uma URL (sem www), pra casar web app ↔ nosso app.
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let host = rest.split(['/']).next()?.split('@').last()?.split(':').next()?;
+    let host = host.trim().to_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host).to_owned();
+    if host.is_empty() { None } else { Some(host) }
+}
+
 // ---- launch ----
 
 /// Prepara o perfil e dispara o Firefox. Não espera o processo.
@@ -250,10 +281,19 @@ pub fn launch(store: &Store, app: &WebApp) -> Result<(), String> {
     let dir = store.profile_dir(&app.id);
     let mut cmd = Command::new(&firefox);
     cmd.arg("-no-remote").arg("-profile").arg(&dir);
-    if app.kiosk {
-        cmd.arg("-kiosk");
+    if app.app_mode {
+        // Web app do Firefox: janela própria, ícone do site na taskbar
+        // (Firefox 143+; em versão sem suporte o arg é ignorado e abre normal).
+        let tab_id = find_taskbar_tab(&dir, app)
+            .unwrap_or_else(|| format!("localbrowser-{}", app.id)); // provisório na 1ª vez
+        cmd.arg("-taskbar-tab").arg(tab_id);
+        cmd.arg("-new-window").arg(&app.url);
+    } else {
+        if app.kiosk {
+            cmd.arg("-kiosk");
+        }
+        cmd.arg(&app.url);
     }
-    cmd.arg(&app.url);
     no_window(&mut cmd);
     cmd.spawn()
         .map_err(|e| format!("iniciar Firefox: {e}"))?;

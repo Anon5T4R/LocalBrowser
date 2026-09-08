@@ -14,6 +14,8 @@ export interface WebApp {
   url: string;
   kiosk: boolean;
   ublock: boolean;
+  /** web app do Firefox (-taskbar-tab): janela própria, ícone do site */
+  appMode: boolean;
   extensions: Extension[];
 }
 

@@ -33,6 +33,10 @@ pub struct WebApp {
     pub kiosk: bool,
     /// pré-instala o uBlock Origin no perfil
     pub ublock: bool,
+    /// abre como web app do Firefox (-taskbar-tab): janela própria, ícone do
+    /// site na taskbar (Firefox 143+; em versões velhas cai no modo normal)
+    #[serde(default)]
+    pub app_mode: bool,
     pub extensions: Vec<Extension>,
 }
 

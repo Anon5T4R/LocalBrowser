@@ -30,6 +30,7 @@ const pt = {
   "card.edit": "Editar",
   "card.delete": "Excluir",
   "badge.kiosk": "kiosk",
+  "badge.app": "app",
   "badge.ublock": "uBlock",
   "badge.exts": "{n} ext.",
 
@@ -40,6 +41,7 @@ const pt = {
   "dlg.namePlaceholder": "ex.: Spotify",
   "dlg.urlPlaceholder": "ex.: open.spotify.com",
   "dlg.kiosk": "Modo kiosk (janela sem barra do navegador)",
+  "dlg.appMode": "Modo app (janela própria do Firefox com ícone do site na barra de tarefas)",
   "dlg.ublock": "uBlock Origin pré-instalado",
   "dlg.presets": "Sugestões",
   "dlg.deleteTitle": "Excluir app",
@@ -99,6 +101,7 @@ const en: Record<MessageKey, string> = {
   "card.edit": "Edit",
   "card.delete": "Delete",
   "badge.kiosk": "kiosk",
+  "badge.app": "app",
   "badge.ublock": "uBlock",
   "badge.exts": "{n} ext.",
 
@@ -109,6 +112,7 @@ const en: Record<MessageKey, string> = {
   "dlg.namePlaceholder": "e.g. Spotify",
   "dlg.urlPlaceholder": "e.g. open.spotify.com",
   "dlg.kiosk": "Kiosk mode (window without browser chrome)",
+  "dlg.appMode": "App mode (Firefox window of its own, site icon on the taskbar)",
   "dlg.ublock": "uBlock Origin pre-installed",
   "dlg.presets": "Suggestions",
   "dlg.deleteTitle": "Delete app",
@@ -166,6 +170,7 @@ const es: Record<MessageKey, string> = {
   "card.edit": "Editar",
   "card.delete": "Eliminar",
   "badge.kiosk": "kiosk",
+  "badge.app": "app",
   "badge.ublock": "uBlock",
   "badge.exts": "{n} ext.",
 
@@ -176,6 +181,7 @@ const es: Record<MessageKey, string> = {
   "dlg.namePlaceholder": "ej.: Spotify",
   "dlg.urlPlaceholder": "ej.: open.spotify.com",
   "dlg.kiosk": "Modo kiosk (ventana sin barra del navegador)",
+  "dlg.appMode": "Modo app (ventana propia de Firefox con icono del sitio en la barra de tareas)",
   "dlg.ublock": "uBlock Origin preinstalado",
   "dlg.presets": "Sugerencias",
   "dlg.deleteTitle": "Eliminar app",
